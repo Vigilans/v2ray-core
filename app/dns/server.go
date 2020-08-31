@@ -229,6 +229,7 @@ func New(ctx context.Context, config *Config) (*Server, error) {
 
 	if len(server.clients) == 0 {
 		server.clients = append(server.clients, NewLocalNameServer())
+		server.ipIndexMap = append(server.ipIndexMap, nil)
 	}
 
 	return server, nil
@@ -256,7 +257,10 @@ func (s *Server) IsOwnLink(ctx context.Context) bool {
 
 // Match check dns ip match geoip
 func (s *Server) Match(idx int, client Client, domain string, ips []net.IP) ([]net.IP, error) {
-	matcher := s.ipIndexMap[idx]
+	var matcher *MultiGeoIPMatcher
+	if idx < len(s.ipIndexMap) {
+		matcher = s.ipIndexMap[idx]
+	}
 	if matcher == nil {
 		return ips, nil
 	}
