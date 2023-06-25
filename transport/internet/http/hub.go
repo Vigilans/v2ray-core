@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/http2"
@@ -38,15 +39,19 @@ func (l *Listener) Close() error {
 type flushWriter struct {
 	w io.Writer
 	d *done.Instance
+	m *sync.RWMutex
 }
 
 func (fw flushWriter) Write(p []byte) (n int, err error) {
+	fw.m.RLock()
+	defer fw.m.RUnlock()
+
 	if fw.d.Done() {
 		return 0, io.ErrClosedPipe
 	}
 
 	n, err = fw.w.Write(p)
-	if fw.d.Done() {
+	if err != nil {
 		return
 	}
 	if f, ok := fw.w.(http.Flusher); ok {
@@ -99,16 +104,19 @@ func (l *Listener) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 		}
 	}
 
+	mutex := new(sync.RWMutex)
 	done := done.New()
 	conn := net.NewConnection(
 		net.ConnectionOutput(request.Body),
-		net.ConnectionInput(flushWriter{w: writer, d: done}),
+		net.ConnectionInput(flushWriter{w: writer, d: done, m: mutex}),
 		net.ConnectionOnClose(common.ChainedClosable{done, request.Body}),
 		net.ConnectionLocalAddr(l.Addr()),
 		net.ConnectionRemoteAddr(remoteAddr),
 	)
 	l.handler(conn)
 	<-done.Wait()
+	mutex.Lock()
+	defer mutex.Unlock()
 }
 
 func Listen(ctx context.Context, address net.Address, port net.Port, streamSettings *internet.MemoryStreamConfig, handler internet.ConnHandler) (internet.Listener, error) {
