@@ -9,6 +9,7 @@ import (
 	"github.com/v2fly/v2ray-core/v5/common/platform/filesystem"
 	"github.com/v2fly/v2ray-core/v5/infra/conf/cfgcommon"
 	"github.com/v2fly/v2ray-core/v5/transport/internet/tls"
+	"github.com/v2fly/v2ray-core/v5/transport/internet/tls/utls"
 )
 
 //go:generate go run github.com/v2fly/v2ray-core/v5/common/errors/errorgen
@@ -111,4 +112,44 @@ func readFileOrString(f string, s []string) ([]byte, error) {
 		return []byte(strings.Join(s, "\n")), nil
 	}
 	return nil, newError("both file and bytes are empty.")
+}
+
+type UTLSConfig struct {
+	TLSConfig *TLSConfig `json:"tlsConfig"`
+	Imitate   string     `json:"imitate"`
+	NoSNI     bool       `json:"noSNI"`
+	ForceAlpn string     `json:"forceAlpn"`
+}
+
+// Build implements Buildable.
+func (c *UTLSConfig) Build(externalTLSSettings *TLSConfig) (proto.Message, error) {
+	config := new(utls.Config)
+
+	tlsConfig := c.TLSConfig
+	if tlsConfig == nil {
+		tlsConfig = externalTLSSettings
+	}
+	if tlsConfig == nil {
+		tlsConfig = &TLSConfig{}
+	}
+	tlsConfigMessage, err := tlsConfig.Build()
+	if err != nil {
+		return nil, err
+	}
+	config.TlsConfig = tlsConfigMessage.(*tls.Config)
+	config.Imitate = c.Imitate
+	config.NoSNI = c.NoSNI
+
+	switch strings.ToLower(c.ForceAlpn) {
+	case "transport_preference_take_priority", "transport-preference-take-priority", "transportpreferencepriority":
+		config.ForceAlpn = utls.ForcedALPN_TRANSPORT_PREFERENCE_TAKE_PRIORITY
+	case "no_alpn", "no-alpn", "noalpn":
+		config.ForceAlpn = utls.ForcedALPN_NO_ALPN
+	case "utls_preset", "utls-preset", "utlspreset":
+		config.ForceAlpn = utls.ForcedALPN_UTLS_PRESET
+	default:
+		config.ForceAlpn = utls.ForcedALPN_TRANSPORT_PREFERENCE_TAKE_PRIORITY
+	}
+
+	return config, nil
 }

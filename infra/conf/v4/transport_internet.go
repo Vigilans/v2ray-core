@@ -288,6 +288,7 @@ type StreamConfig struct {
 	Network        *TransportProtocol      `json:"network"`
 	Security       string                  `json:"security"`
 	TLSSettings    *tlscfg.TLSConfig       `json:"tlsSettings"`
+	UTLSSettings   *tlscfg.UTLSConfig      `json:"utlsSettings"`
 	TCPSettings    *TCPConfig              `json:"tcpSettings"`
 	KCPSettings    *KCPConfig              `json:"kcpSettings"`
 	WSSettings     *WebSocketConfig        `json:"wsSettings"`
@@ -319,6 +320,19 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
 		ts, err := tlsSettings.Build()
 		if err != nil {
 			return nil, newError("Failed to build TLS config.").Base(err)
+		}
+		tm := serial.ToTypedMessage(ts)
+		config.SecuritySettings = append(config.SecuritySettings, tm)
+		config.SecurityType = serial.V2Type(tm)
+	}
+	if strings.EqualFold(c.Security, "utls") {
+		utlsSettings := c.UTLSSettings
+		if utlsSettings == nil {
+			utlsSettings = &tlscfg.UTLSConfig{}
+		}
+		ts, err := utlsSettings.Build(c.TLSSettings)
+		if err != nil {
+			return nil, newError("Failed to build UTLS config.").Base(err)
 		}
 		tm := serial.ToTypedMessage(ts)
 		config.SecuritySettings = append(config.SecuritySettings, tm)
