@@ -138,6 +138,7 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 		ProtoMinor: 0,
 		Header:     httpHeaders,
 	}
+	request = request.WithContext(ctx)
 	// Disable any compression method from server.
 	request.Header.Set("Accept-Encoding", "identity")
 
