@@ -38,6 +38,10 @@ func (r *Rule) Apply(ctx routing.Context) bool {
 func (rr *RoutingRule) BuildCondition() (Condition, error) {
 	conds := NewConditionChan()
 
+	if len(rr.InboundTag) > 0 {
+		conds.Add(NewInboundTagMatcher(rr.InboundTag))
+	}
+
 	if len(rr.Domain) > 0 {
 		cond, err := NewDomainMatcher(rr.DomainMatcher, rr.Domain)
 		if err != nil {
@@ -60,10 +64,6 @@ func (rr *RoutingRule) BuildCondition() (Condition, error) {
 
 	if len(rr.UserEmail) > 0 {
 		conds.Add(NewUserMatcher(rr.UserEmail))
-	}
-
-	if len(rr.InboundTag) > 0 {
-		conds.Add(NewInboundTagMatcher(rr.InboundTag))
 	}
 
 	if rr.PortList != nil {
