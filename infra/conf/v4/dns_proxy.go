@@ -13,6 +13,7 @@ type DNSOutboundConfig struct {
 	Address   *cfgcommon.Address `json:"address"`
 	Port      uint16             `json:"port"`
 	UserLevel uint32             `json:"userLevel"`
+	FakeDNS   *bool              `json:"fakedns"`
 }
 
 func (c *DNSOutboundConfig) Build() (proto.Message, error) {
@@ -25,6 +26,9 @@ func (c *DNSOutboundConfig) Build() (proto.Message, error) {
 	}
 	if c.Address != nil {
 		config.Server.Address = c.Address.Build()
+	}
+	if c.FakeDNS != nil {
+		config.FakednsDisabled = !*c.FakeDNS
 	}
 	return config, nil
 }

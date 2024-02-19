@@ -37,7 +37,9 @@ func init() {
 	common.Must(common.RegisterConfig((*SimplifiedConfig)(nil), func(ctx context.Context, config interface{}) (interface{}, error) {
 		simplifiedServer := config.(*SimplifiedConfig)
 		_ = simplifiedServer
-		fullConfig := &Config{}
+		fullConfig := &Config{
+			FakednsDisabled: simplifiedServer.FakednsDisabled,
+		}
 		return common.CreateObject(ctx, fullConfig)
 	}))
 }
@@ -57,7 +59,7 @@ type Handler struct {
 
 func (h *Handler) Init(config *Config, dnsClient dns.Client, policyManager policy.Manager) error {
 	// Enable FakeDNS for DNS outbound
-	if clientWithFakeDNS, ok := dnsClient.(dns.ClientWithFakeDNS); ok {
+	if clientWithFakeDNS, ok := dnsClient.(dns.ClientWithFakeDNS); ok && !config.FakednsDisabled {
 		dnsClient = clientWithFakeDNS.AsFakeDNSClient()
 	}
 	h.client = dnsClient
