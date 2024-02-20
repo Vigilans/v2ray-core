@@ -90,14 +90,18 @@ func (e Engine) Client(conn net.Conn, opts ...security.Option) (security.Conn, e
 	if err != nil {
 		return nil, newError("unable to finish utls handshake").Base(err)
 	}
-	return uTLSClientConnection{utlsClientConn}, nil
+	return UTLSClientConnection{utlsClientConn}, nil
 }
 
-type uTLSClientConnection struct {
+func (e Engine) GetServerName() string {
+	return e.config.TlsConfig.ServerName
+}
+
+type UTLSClientConnection struct {
 	*utls.UConn
 }
 
-func (u uTLSClientConnection) GetConnectionApplicationProtocol() (string, error) {
+func (u UTLSClientConnection) GetConnectionApplicationProtocol() (string, error) {
 	if err := u.Handshake(); err != nil {
 		return "", err
 	}
@@ -106,11 +110,15 @@ func (u uTLSClientConnection) GetConnectionApplicationProtocol() (string, error)
 
 func uTLSConfigFromTLSConfig(config *systls.Config) (*utls.Config, error) { // nolint: unparam
 	uconfig := &utls.Config{
-		Rand:       config.Rand,
-		Time:       config.Time,
-		RootCAs:    config.RootCAs,
-		NextProtos: config.NextProtos,
-		ServerName: config.ServerName,
+		Rand:                   config.Rand,
+		Time:                   config.Time,
+		RootCAs:                config.RootCAs,
+		InsecureSkipVerify:     config.InsecureSkipVerify,
+		NextProtos:             config.NextProtos,
+		SessionTicketsDisabled: config.SessionTicketsDisabled,
+		ServerName:             config.ServerName,
+		VerifyPeerCertificate:  config.VerifyPeerCertificate,
+		ClientCAs:              config.ClientCAs,
 	}
 	return uconfig, nil
 }
