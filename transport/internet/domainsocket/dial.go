@@ -13,15 +13,25 @@ import (
 )
 
 func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.MemoryStreamConfig) (internet.Connection, error) {
-	settings := streamSettings.ProtocolSettings.(*Config)
-	addr, err := settings.GetUnixAddr()
-	if err != nil {
-		return nil, err
+	var addr *net.UnixAddr
+	var err error
+	if settings, ok := streamSettings.ProtocolSettings.(*Config); ok {
+		addr, err = settings.GetUnixAddr()
+		if err != nil {
+			return nil, err
+		}
+	} else if dest.Network == net.Network_UNIX {
+		addr = &net.UnixAddr{
+			Name: dest.Address.Domain(),
+			Net:  "unix",
+		}
+	} else {
+		return nil, newError("cannot find domain socket destination from destination ", dest.String()).AtWarning()
 	}
 
 	conn, err := net.DialUnix("unix", nil, addr)
 	if err != nil {
-		return nil, newError("failed to dial unix: ", settings.Path).Base(err).AtWarning()
+		return nil, newError("failed to dial unix: ", addr.Name).Base(err).AtWarning()
 	}
 
 	if config := tls.ConfigFromStreamSettings(streamSettings); config != nil {

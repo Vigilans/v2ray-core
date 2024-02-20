@@ -63,6 +63,14 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *MemoryStrea
 		return udpDialer(ctx, dest, streamSettings)
 	}
 
+	if dest.Network == net.Network_UNIX {
+		dsDialer := transportDialerCache["domainsocket"]
+		if dsDialer == nil {
+			return nil, newError("domain socket dialer not registered").AtError()
+		}
+		return dsDialer(ctx, dest, streamSettings)
+	}
+
 	return nil, newError("unknown network ", dest.Network)
 }
 

@@ -59,7 +59,13 @@ func NewServerSpec(dest net.Destination, valid ValidationStrategy, users ...*Mem
 }
 
 func NewServerSpecFromPB(spec *ServerEndpoint) (*ServerSpec, error) {
-	dest := net.TCPDestination(spec.Address.AsAddress(), net.Port(spec.Port))
+	address := spec.Address.AsAddress()
+	var dest net.Destination
+	if isDS := address.Family().IsDomain() && (address.Domain()[0] == '/' || address.Domain()[0] == '@'); isDS {
+		dest = net.UnixDestination(address)
+	} else {
+		dest = net.TCPDestination(address, net.Port(spec.Port))
+	}
 	mUsers := make([]*MemoryUser, len(spec.User))
 	for idx, u := range spec.User {
 		mUser, err := u.ToMemoryUser()
