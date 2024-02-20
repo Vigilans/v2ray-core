@@ -42,8 +42,14 @@ func WriteAllBytes(writer io.Writer, payload []byte) error {
 }
 
 func isPacketReader(reader io.Reader) bool {
-	_, ok := reader.(net.PacketConn)
-	return ok
+	if _, ok := reader.(net.PacketConn); ok {
+		// net.UnixConn always implements net.PacketConn, but only `unixgram` acts like a (UDP) packet connection.
+		uc, ok := reader.(*net.UnixConn)
+		if !ok || uc.LocalAddr().Network() == "unixgram" {
+			return true
+		}
+	}
+	return false
 }
 
 // NewReader creates a new Reader.
@@ -89,7 +95,11 @@ func NewPacketReader(reader io.Reader) Reader {
 
 func isPacketWriter(writer io.Writer) bool {
 	if _, ok := writer.(net.PacketConn); ok {
-		return true
+		// net.UnixConn always implements net.PacketConn, but only `unixgram` acts like a (UDP) packet connection.
+		uc, ok := writer.(*net.UnixConn)
+		if !ok || uc.LocalAddr().Network() == "unixgram" {
+			return true
+		}
 	}
 
 	// If the writer doesn't implement syscall.Conn, it is probably not a TCP connection.
