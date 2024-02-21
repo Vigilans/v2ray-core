@@ -42,6 +42,12 @@ func (rr *RoutingRule) BuildCondition() (Condition, error) {
 		conds.Add(NewInboundTagMatcher(rr.InboundTag))
 	}
 
+	if len(rr.Networks) > 0 {
+		conds.Add(NewNetworkMatcher(rr.Networks))
+	} else if rr.NetworkList != nil {
+		conds.Add(NewNetworkMatcher(rr.NetworkList.Network))
+	}
+
 	if len(rr.Domain) > 0 {
 		cond, err := NewDomainMatcher(rr.DomainMatcher, rr.Domain)
 		if err != nil {
@@ -74,12 +80,6 @@ func (rr *RoutingRule) BuildCondition() (Condition, error) {
 
 	if rr.SourcePortList != nil {
 		conds.Add(NewPortMatcher(rr.SourcePortList, true))
-	}
-
-	if len(rr.Networks) > 0 {
-		conds.Add(NewNetworkMatcher(rr.Networks))
-	} else if rr.NetworkList != nil {
-		conds.Add(NewNetworkMatcher(rr.NetworkList.Network))
 	}
 
 	if len(rr.Geoip) > 0 {
