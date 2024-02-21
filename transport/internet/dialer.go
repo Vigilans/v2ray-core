@@ -33,7 +33,7 @@ func RegisterTransportDialer(protocol string, dialer dialFunc) error {
 
 // Dial dials a internet connection towards the given destination.
 func Dial(ctx context.Context, dest net.Destination, streamSettings *MemoryStreamConfig) (Connection, error) {
-	if dest.Network == net.Network_TCP {
+	if dest.Network == net.Network_TCP || dest.Network == net.Network_UNIX {
 		if streamSettings == nil {
 			s, err := ToMemoryStreamConfig(nil)
 			if err != nil {
@@ -61,14 +61,6 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *MemoryStrea
 			return nil, newError("UDP dialer not registered").AtError()
 		}
 		return udpDialer(ctx, dest, streamSettings)
-	}
-
-	if dest.Network == net.Network_UNIX {
-		dsDialer := transportDialerCache["domainsocket"]
-		if dsDialer == nil {
-			return nil, newError("domain socket dialer not registered").AtError()
-		}
-		return dsDialer(ctx, dest, streamSettings)
 	}
 
 	return nil, newError("unknown network ", dest.Network)
