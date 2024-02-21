@@ -25,6 +25,9 @@ import (
 	"github.com/v2fly/v2ray-core/v5/transport/pipe"
 )
 
+var interfaceAddrs map[net.Address]bool
+var interfaceAddrsLastUpdateTime int64
+
 type worker interface {
 	Start() error
 	Close() error
@@ -43,7 +46,6 @@ type tcpWorker struct {
 	sniffingConfig  *proxyman.SniffingConfig
 	uplinkCounter   stats.Counter
 	downlinkCounter stats.Counter
-	listeningAddrs  map[net.Address]bool
 
 	hub internet.Listener
 
@@ -57,21 +59,45 @@ func getTProxyType(s *internet.MemoryStreamConfig) internet.SocketConfig_TProxyM
 	return s.SocketSettings.Tproxy
 }
 
+func isInterfaceAddr(ctx context.Context, address net.Address) bool {
+	if address.Family().IsDomain() {
+		return false
+	}
+	now := time.Now().Unix()
+	if interfaceAddrs == nil || now-atomic.LoadInt64(&interfaceAddrsLastUpdateTime) > 600 {
+		addrs, err := net.InterfaceAddrs()
+		if err != nil {
+			return false
+		}
+		newInterfaceAddrs := make(map[net.Address]bool)
+		for _, addr := range addrs {
+			newInterfaceAddrs[net.IPAddress(addr.(*net.IPNet).IP)] = true
+		}
+		interfaceAddrs = newInterfaceAddrs
+		interfaceAddrsLastUpdateTime = now
+	}
+	return interfaceAddrs[address]
+}
+
 func (w *tcpWorker) getGateway(originDest net.Destination) net.Destination {
 	if !originDest.IsValid() {
 		return net.TCPDestination(w.address, w.port)
 	}
+	// Inbound listening address is already a non-wildcard address, use it as gateway
 	if w.address != net.AnyIP && w.address != net.AnyIPv6 {
 		return net.TCPDestination(w.address, w.port)
 	}
-	if getTProxyType(w.stream) != internet.SocketConfig_TProxy {
-		if w.port != originDest.Port {
-			return net.TCPDestination(w.address, w.port)
-		}
-		if !w.listeningAddrs[originDest.Address] {
+	// In tproxy mode, originDest may not be the inbound's listening address
+	if getTProxyType(w.stream) != internet.SocketConfig_Off {
+		// It is gateway address only if it is one of interface's address and port matches listening port
+		if w.port == originDest.Port && isInterfaceAddr(w.ctx, originDest.Address) {
+			return originDest
+		} else {
 			return net.TCPDestination(w.address, w.port)
 		}
 	}
+	// In non-tproxy mode, originDest is the inbound's address,
+	// and it holds more specific IP rather than 0.0.0.0 or ::, use it as gateway
 	return originDest
 }
 
@@ -267,7 +293,6 @@ type udpWorker struct {
 	sniffingConfig  *proxyman.SniffingConfig
 	uplinkCounter   stats.Counter
 	downlinkCounter stats.Counter
-	listeningAddrs  map[net.Address]bool
 
 	checker    *task.Periodic
 	activeConn map[connID]*udpConn
@@ -319,17 +344,21 @@ func (w *udpWorker) getGateway(originDest net.Destination) net.Destination {
 	if !originDest.IsValid() {
 		return net.UDPDestination(w.address, w.port)
 	}
+	// Inbound listening address is already a non-wildcard address, use it as gateway
 	if w.address != net.AnyIP && w.address != net.AnyIPv6 {
 		return net.UDPDestination(w.address, w.port)
 	}
+	// In tproxy mode, originDest may not be the inbound's listening address
 	if getTProxyType(w.stream) != internet.SocketConfig_Off {
-		if w.port != originDest.Port {
-			return net.UDPDestination(w.address, w.port)
-		}
-		if !w.listeningAddrs[originDest.Address] {
+		// It is gateway address only if it is one of interface's address and port matches listening port
+		if w.port == originDest.Port && isInterfaceAddr(w.ctx, originDest.Address) {
+			return originDest
+		} else {
 			return net.UDPDestination(w.address, w.port)
 		}
 	}
+	// In non-tproxy mode, originDest is the inbound's address,
+	// and it holds more specific IP rather than 0.0.0.0 or ::, use it as gateway
 	return originDest
 }
 
