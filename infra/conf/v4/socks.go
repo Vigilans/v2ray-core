@@ -6,6 +6,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
+	"github.com/v2fly/v2ray-core/v5/common/net/packetaddr"
 	"github.com/v2fly/v2ray-core/v5/common/protocol"
 	"github.com/v2fly/v2ray-core/v5/common/serial"
 	"github.com/v2fly/v2ray-core/v5/infra/conf/cfgcommon"
@@ -36,6 +37,7 @@ type SocksServerConfig struct {
 	Host       *cfgcommon.Address `json:"ip"`
 	Timeout    uint32             `json:"timeout"`
 	UserLevel  uint32             `json:"userLevel"`
+	FullCone   bool               `json:"fullcone"`
 }
 
 func (v *SocksServerConfig) Build() (proto.Message, error) {
@@ -60,6 +62,9 @@ func (v *SocksServerConfig) Build() (proto.Message, error) {
 	config.UdpEnabled = v.UDP
 	if v.Host != nil {
 		config.Address = v.Host.Build()
+	}
+	if v.FullCone {
+		config.PacketEncoding = packetaddr.PacketAddrType_Packet
 	}
 
 	config.Timeout = v.Timeout

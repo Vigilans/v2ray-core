@@ -3,6 +3,7 @@ package v4
 import (
 	"github.com/golang/protobuf/proto"
 
+	"github.com/v2fly/v2ray-core/v5/common/net/packetaddr"
 	"github.com/v2fly/v2ray-core/v5/common/protocol"
 	"github.com/v2fly/v2ray-core/v5/common/serial"
 	"github.com/v2fly/v2ray-core/v5/infra/conf/cfgcommon"
@@ -17,6 +18,7 @@ type ShadowsocksServerConfig struct {
 	Email       string                 `json:"email"`
 	NetworkList *cfgcommon.NetworkList `json:"network"`
 	IVCheck     bool                   `json:"ivCheck"`
+	FullCone    bool                   `json:"fullcone"`
 }
 
 func (v *ShadowsocksServerConfig) Build() (proto.Message, error) {
@@ -40,6 +42,10 @@ func (v *ShadowsocksServerConfig) Build() (proto.Message, error) {
 		Email:   v.Email,
 		Level:   uint32(v.Level),
 		Account: serial.ToTypedMessage(account),
+	}
+
+	if v.FullCone {
+		config.PacketEncoding = packetaddr.PacketAddrType_Packet
 	}
 
 	return config, nil

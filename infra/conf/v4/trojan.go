@@ -9,6 +9,7 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/v2fly/v2ray-core/v5/common/net"
+	"github.com/v2fly/v2ray-core/v5/common/net/packetaddr"
 	"github.com/v2fly/v2ray-core/v5/common/protocol"
 	"github.com/v2fly/v2ray-core/v5/common/serial"
 	"github.com/v2fly/v2ray-core/v5/infra/conf/cfgcommon"
@@ -92,6 +93,7 @@ type TrojanServerConfig struct {
 	Clients   []*TrojanUserConfig      `json:"clients"`
 	Fallback  json.RawMessage          `json:"fallback"`
 	Fallbacks []*TrojanInboundFallback `json:"fallbacks"`
+	FullCone  bool                     `json:"fullcone"`
 }
 
 // Build implements Buildable
@@ -166,6 +168,10 @@ func (c *TrojanServerConfig) Build() (proto.Message, error) {
 		if fb.Xver > 2 {
 			return nil, newError(`Trojan fallbacks: invalid PROXY protocol version, "xver" only accepts 0, 1, 2`)
 		}
+	}
+
+	if c.FullCone {
+		config.PacketEncoding = packetaddr.PacketAddrType_Packet
 	}
 
 	return config, nil
