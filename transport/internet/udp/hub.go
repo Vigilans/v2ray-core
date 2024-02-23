@@ -6,6 +6,7 @@ import (
 	"github.com/v2fly/v2ray-core/v5/common/buf"
 	"github.com/v2fly/v2ray-core/v5/common/net"
 	"github.com/v2fly/v2ray-core/v5/common/protocol/udp"
+	"github.com/v2fly/v2ray-core/v5/common/session"
 	"github.com/v2fly/v2ray-core/v5/transport/internet"
 )
 
@@ -24,7 +25,7 @@ func HubReceiveOriginalDestination(r bool) HubOption {
 }
 
 type Hub struct {
-	conn         *net.UDPConn
+	conn         net.PacketConn
 	cache        chan *udp.Packet
 	capacity     int
 	recvOrigDest bool
@@ -47,17 +48,35 @@ func ListenUDP(ctx context.Context, address net.Address, port net.Port, streamSe
 		hub.recvOrigDest = true
 	}
 
-	udpConn, err := internet.ListenSystemPacket(ctx, &net.UDPAddr{
-		IP:   address.IP(),
-		Port: int(port),
-	}, sockopt)
-	if err != nil {
-		return nil, err
+	if address.Family().IsDomain() && (address.Domain()[0] == '/' || address.Domain()[0] == '@') && port == net.Port(0) { // unix
+		dsConn, err := internet.ListenSystemPacket(ctx, &net.UnixAddr{
+			Name: address.Domain(),
+			Net:  "unixgram",
+		}, sockopt)
+		if err != nil {
+			return nil, newError("failed to listen Unixgram Domain Socket on ", address).Base(err)
+		}
+		if _, ok := dsConn.(unixConn); !ok {
+			return nil, newError("returned PacketConn is not *net.UnixConn", address).Base(err)
+		}
+		newError("listening Unixgram Domain Socket on ", address).WriteToLog(session.ExportIDToError(ctx))
+		hub.conn = dsConn
+	} else { // udp
+		udpConn, err := internet.ListenSystemPacket(ctx, &net.UDPAddr{
+			IP:   address.IP(),
+			Port: int(port),
+		}, sockopt)
+		if err != nil {
+			return nil, newError("failed to listen UDP on ", address, ":", port).Base(err)
+		}
+		if _, ok := udpConn.(*net.UDPConn); !ok {
+			return nil, newError("returned PacketConn is not *net.UDPConn", address).Base(err)
+		}
+		newError("listening UDP on ", address, ":", port).WriteToLog(session.ExportIDToError(ctx))
+		hub.conn = udpConn
 	}
-	newError("listening UDP on ", address, ":", port).WriteToLog()
-	hub.conn = udpConn.(*net.UDPConn)
-	hub.cache = make(chan *udp.Packet, hub.capacity)
 
+	hub.cache = make(chan *udp.Packet, hub.capacity)
 	go hub.start()
 	return hub, nil
 }
@@ -69,10 +88,17 @@ func (h *Hub) Close() error {
 }
 
 func (h *Hub) WriteTo(payload []byte, dest net.Destination) (int, error) {
-	return h.conn.WriteToUDP(payload, &net.UDPAddr{
-		IP:   dest.Address.IP(),
-		Port: int(dest.Port),
-	})
+	switch conn := h.conn.(type) {
+	case *net.UDPConn:
+		if dest.Network == net.Network_UDP {
+			return conn.WriteToUDP(payload, &net.UDPAddr{IP: dest.Address.IP(), Port: int(dest.Port)})
+		}
+	case unixConn:
+		if dest.Network == net.Network_UNIXGRAM {
+			return conn.WriteToUnix(payload, &net.UnixAddr{Name: dest.Address.Domain(), Net: "unixgram"})
+		}
+	}
+	return 0, newError("failed to write to destination due to network mismatch: ", dest)
 }
 
 func (h *Hub) start() {
@@ -82,12 +108,20 @@ func (h *Hub) start() {
 	oobBytes := make([]byte, 256)
 
 	for {
+		var n, noob int
+		var addr net.Addr
+		var err error
+
 		buffer := buf.New()
-		var noob int
-		var addr *net.UDPAddr
 		rawBytes := buffer.Extend(buf.Size)
 
-		n, noob, _, addr, err := ReadUDPMsg(h.conn, rawBytes, oobBytes)
+		switch conn := h.conn.(type) {
+		case *net.UDPConn:
+			n, noob, _, addr, err = ReadUDPMsg(conn, rawBytes, oobBytes)
+		case unixConn:
+			n, noob, _, addr, err = conn.ReadMsgUnix(rawBytes, oobBytes)
+		}
+
 		if err != nil {
 			newError("failed to read UDP msg").Base(err).WriteToLog()
 			buffer.Release()
@@ -100,11 +134,12 @@ func (h *Hub) start() {
 			continue
 		}
 
+		source := net.DestinationFromAddr(addr)
 		payload := &udp.Packet{
 			Payload: buffer,
-			Source:  net.UDPDestination(net.IPAddress(addr.IP), net.Port(addr.Port)),
+			Source:  source,
 		}
-		if h.recvOrigDest && noob > 0 {
+		if source.Network == net.Network_UDP && h.recvOrigDest && noob > 0 {
 			payload.Target = RetrieveOriginalDest(oobBytes[:noob])
 			if payload.Target.IsValid() {
 				newError("UDP original destination: ", payload.Target).AtDebug().WriteToLog()
@@ -129,4 +164,9 @@ func (h *Hub) Addr() net.Addr {
 
 func (h *Hub) Receive() <-chan *udp.Packet {
 	return h.cache
+}
+
+type unixConn interface {
+	ReadMsgUnix(b, oob []byte) (n, oobn, flags int, addr *net.UnixAddr, err error)
+	WriteToUnix(b []byte, addr *net.UnixAddr) (int, error)
 }
