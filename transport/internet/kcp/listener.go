@@ -113,10 +113,7 @@ func (l *Listener) OnReceive(payload *buf.Buffer, src net.Destination) {
 			dest:     src,
 			listener: l,
 		}
-		remoteAddr := &net.UDPAddr{
-			IP:   src.Address.IP(),
-			Port: int(src.Port),
-		}
+		remoteAddr := src.AsAddr()
 		localAddr := l.hub.Addr()
 		conn = NewConnection(ConnMetadata{
 			LocalAddr:    localAddr,

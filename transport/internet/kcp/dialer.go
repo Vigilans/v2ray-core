@@ -44,7 +44,14 @@ func fetchInput(_ context.Context, input io.Reader, reader PacketReader, conn *C
 
 // DialKCP dials a new KCP connections to the specific destination.
 func DialKCP(ctx context.Context, dest net.Destination, streamSettings *internet.MemoryStreamConfig) (internet.Connection, error) {
-	dest.Network = net.Network_UDP
+	switch dest.Network {
+	case net.Network_TCP:
+		dest.Network = net.Network_UDP
+	case net.Network_UNIX:
+		dest.Network = net.Network_UNIXGRAM
+	default:
+		dest.Network = net.Network_UDP
+	}
 	newError("dialing mKCP to ", dest).WriteToLog()
 
 	rawConn, err := internet.DialSystem(ctx, dest, streamSettings.SocketSettings)
