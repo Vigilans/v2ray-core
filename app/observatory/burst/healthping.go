@@ -17,6 +17,7 @@ type HealthPingSettings struct {
 	Interval      time.Duration `json:"interval"`
 	SamplingCount int           `json:"sampling"`
 	Timeout       time.Duration `json:"timeout"`
+	CheckOnStart  bool          `json:"checkOnStart"`
 }
 
 // HealthPing is the health checker for balancers
@@ -40,6 +41,7 @@ func NewHealthPing(ctx context.Context, config *HealthPingConfig) *HealthPing {
 			Interval:      time.Duration(config.Interval),
 			SamplingCount: int(config.SamplingCount),
 			Timeout:       time.Duration(config.Timeout),
+			CheckOnStart:  config.CheckOnStart,
 		}
 	}
 	if settings.Destination == "" {
@@ -145,7 +147,7 @@ func (h *HealthPing) doCheck(tags []string, duration time.Duration, rounds int) 
 		)
 		for i := 0; i < rounds; i++ {
 			delay := time.Duration(0)
-			if duration > 0 {
+			if duration > 0 && !(h.Settings.CheckOnStart && i == 0 && h.Results == nil) {
 				delay = time.Duration(dice.Roll(int(duration)))
 			}
 			time.AfterFunc(delay, func() {

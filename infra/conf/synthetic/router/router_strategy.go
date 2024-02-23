@@ -49,6 +49,7 @@ type HealthCheckSettings struct {
 	Interval      duration.Duration `json:"interval"`
 	SamplingCount int               `json:"sampling"`
 	Timeout       duration.Duration `json:"timeout"`
+	CheckOnStart  bool              `json:"checkOnStart"`
 }
 
 func (h HealthCheckSettings) Build() (proto.Message, error) {
@@ -58,6 +59,7 @@ func (h HealthCheckSettings) Build() (proto.Message, error) {
 		Interval:      int64(h.Interval),
 		Timeout:       int64(h.Timeout),
 		SamplingCount: int32(h.SamplingCount),
+		CheckOnStart:  h.CheckOnStart,
 	}, nil
 }
 
