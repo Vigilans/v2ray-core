@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	core "github.com/v2fly/v2ray-core/v5"
+	"github.com/v2fly/v2ray-core/v5/common/platform"
 	"github.com/v2fly/v2ray-core/v5/main/commands/base"
 )
 
@@ -31,8 +32,9 @@ func SetSharedFlags(cmd *base.Command) {
 }
 
 func setSharedFlags(cmd *base.Command) {
-	cmd.Flag.StringVar(&apiServerAddrPtr, "s", "127.0.0.1:8080", "")
-	cmd.Flag.StringVar(&apiServerAddrPtr, "server", "127.0.0.1:8080", "")
+	apiServer := platform.NewEnvFlag("v2ray.api.server").GetValue(func() string { return "127.0.0.1:8080" })
+	cmd.Flag.StringVar(&apiServerAddrPtr, "s", apiServer, "")
+	cmd.Flag.StringVar(&apiServerAddrPtr, "server", apiServer, "")
 	cmd.Flag.IntVar(&apiTimeout, "t", 3, "")
 	cmd.Flag.IntVar(&apiTimeout, "timeout", 3, "")
 	cmd.Flag.BoolVar(&apiJSON, "json", false, "")
