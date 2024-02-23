@@ -18,6 +18,8 @@ import (
 	"github.com/v2fly/v2ray-core/v5/features/extension"
 	"github.com/v2fly/v2ray-core/v5/transport/internet"
 	"github.com/v2fly/v2ray-core/v5/transport/internet/security"
+	"github.com/v2fly/v2ray-core/v5/transport/internet/tls"
+	"github.com/v2fly/v2ray-core/v5/transport/internet/tls/utls"
 )
 
 // Dial dials a WebSocket connection to the given destination.
@@ -75,6 +77,23 @@ func dialWebsocket(ctx context.Context, dest net.Destination, streamSettings *in
 	host := dest.NetAddr()
 	if (protocol == "ws" && dest.Port == 80) || (protocol == "wss" && dest.Port == 443) {
 		host = dest.Address.String()
+	}
+	if dest.Network == net.Network_UNIX {
+		for _, header := range wsSettings.Header {
+			if header.Key == "Host" {
+				host = header.Value
+				break
+			}
+		}
+		if host == "" {
+			if config, ok := streamSettings.SecuritySettings.(*tls.Config); ok && config.ServerName != "" {
+				host = config.ServerName
+			} else if config, ok := streamSettings.SecuritySettings.(*utls.Config); ok && config.TlsConfig.ServerName != "" {
+				host = config.TlsConfig.ServerName
+			} else {
+				host = "localhost"
+			}
+		}
 	}
 	uri := protocol + "://" + host + wsSettings.GetNormalizedPath()
 
