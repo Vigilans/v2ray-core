@@ -163,6 +163,10 @@ func NewAlwaysOnInboundHandler(ctx context.Context, tag string, receiverConfig *
 		}
 	}
 
+	if r, ok := p.(proxy.ProcessReceivers); ok {
+		receivers = r.ProcessReceivers(receivers)
+	}
+
 	for _, receiver := range receivers {
 		h.workers = append(h.workers, newWorker(receiver))
 	}

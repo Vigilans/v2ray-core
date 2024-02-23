@@ -2,6 +2,7 @@ package socks
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 type Server struct {
 	config        *ServerConfig
 	policyManager policy.Manager
+	udpAssociate  net.Destination
 }
 
 // NewServer creates a new Server object.
@@ -53,11 +55,40 @@ func (s *Server) policy() policy.Session {
 
 // Network implements proxy.Inbound.
 func (s *Server) Network() []net.Network {
-	list := []net.Network{net.Network_TCP}
+	list := []net.Network{net.Network_TCP, net.Network_UNIX}
 	if s.config.UdpEnabled {
-		list = append(list, net.Network_UDP)
+		list = append(list, net.Network_UDP, net.Network_UNIXGRAM)
 	}
 	return list
+}
+
+// ProcessReceivers implements proxy.ProcessReceivers.
+func (s *Server) ProcessReceivers(baseReceivers []net.Destination) []net.Destination {
+	receivers := []net.Destination{}
+	for _, receiver := range baseReceivers {
+		receivers = append(receivers, receiver)
+		// If this receiver is listening on a UNIX domain socket, and UDP is enabled,
+		// We use following strategy to determine UDP associate address:
+		//   1. If udp associate address not configured in Server Config, use an abstract unix path as the UDP receiver by prefixing the receiver path with @udp.
+		//   2. If domain socket address configured in Server Config, use it as the UDP domain socket address.
+		//   3. Else, use a random UDP port on IP address as the UDP receiver.
+		if receiver.Network == net.Network_UNIX && s.config.UdpEnabled {
+			udpAddr := s.config.Address.AsAddress()
+			if udpAddr == net.AnyIP || udpAddr == net.AnyIPv6 {
+				udpAddr = net.LocalHostIP
+			}
+			if udpAddr == nil {
+				s.udpAssociate = net.UnixgramDestination(net.DomainAddress(fmt.Sprintf("@udp%s", receiver.NetAddr())))
+			} else if udpAddr.Family().IsDomain() && (udpAddr.Domain()[0] == '/' || udpAddr.Domain()[0] == '@') {
+				s.udpAssociate = net.UnixgramDestination(udpAddr)
+			} else {
+				s.udpAssociate = net.UDPDestination(udpAddr, getRandomUDPPort())
+			}
+			receivers = append(receivers, s.udpAssociate)
+			break
+		}
+	}
+	return receivers
 }
 
 // Process implements proxy.Inbound.
@@ -94,6 +125,7 @@ func (s *Server) processTCP(ctx context.Context, conn internet.Connection, dispa
 		address:       inbound.Gateway.Address,
 		port:          inbound.Gateway.Port,
 		clientAddress: inbound.Source.Address,
+		udpAssociate:  s.udpAssociate,
 	}
 
 	reader := &buf.BufferedReader{Reader: buf.NewReader(conn)}
@@ -255,6 +287,15 @@ func (s *Server) handleUDPPayload(ctx context.Context, conn internet.Connection,
 			udpServer.Dispatch(currentPacketCtx, request.Destination(), payload)
 		}
 	}
+}
+
+func getRandomUDPPort() net.Port {
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.LocalHostIP.IP(), Port: 0})
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+	return net.Port(conn.LocalAddr().(*net.UDPAddr).Port)
 }
 
 func init() {

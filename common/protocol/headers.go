@@ -55,10 +55,19 @@ type RequestHeader struct {
 }
 
 func (h *RequestHeader) Destination() net.Destination {
-	if h.Command == RequestCommandUDP {
+	isDS := h.Address.Family().IsDomain() && maybeUnixSocket(h.Address.Domain()[0])
+	switch {
+	case h.Command == RequestCommandTCP && !isDS:
+		return net.TCPDestination(h.Address, h.Port)
+	case h.Command == RequestCommandUDP && !isDS:
 		return net.UDPDestination(h.Address, h.Port)
+	case h.Command == RequestCommandTCP && isDS:
+		return net.UnixDestination(h.Address)
+	case h.Command == RequestCommandUDP && isDS:
+		return net.UnixgramDestination(h.Address)
+	default:
+		return net.TCPDestination(h.Address, h.Port)
 	}
-	return net.TCPDestination(h.Address, h.Port)
 }
 
 const (

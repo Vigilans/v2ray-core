@@ -50,3 +50,8 @@ type GetInbound interface {
 type GetOutbound interface {
 	GetOutbound() Outbound
 }
+
+// ProcessReceivers is the interface for Inbounds that may request additional list of listening addresses based on existing receivers.
+type ProcessReceivers interface {
+	ProcessReceivers([]net.Destination) []net.Destination
+}

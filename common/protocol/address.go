@@ -154,6 +154,10 @@ func maybeIPPrefix(b byte) bool {
 	return b == '[' || (b >= '0' && b <= '9')
 }
 
+func maybeUnixSocket(b byte) bool {
+	return b == '/' || b == '@'
+}
+
 func isValidDomain(d string) bool {
 	for _, c := range d {
 		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '.' || c == '_') {
@@ -214,7 +218,7 @@ func (p *addressParser) readAddress(b *buf.Buffer, reader io.Reader) (net.Addres
 				return addr, nil
 			}
 		}
-		if !isValidDomain(domain) {
+		if !isValidDomain(domain) && !maybeUnixSocket(domain[0]) {
 			return nil, newError("invalid domain name: ", domain)
 		}
 		return net.DomainAddress(domain), nil

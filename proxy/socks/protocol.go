@@ -44,6 +44,7 @@ type ServerSession struct {
 	address       net.Address
 	port          net.Port
 	clientAddress net.Address
+	udpAssociate  net.Destination
 }
 
 func (s *ServerSession) handshake4(cmd byte, reader io.Reader, writer io.Writer) (*protocol.RequestHeader, error) {
@@ -192,7 +193,11 @@ func (s *ServerSession) handshake5(nMethod byte, reader io.Reader, writer io.Wri
 	responsePort := s.port
 	//nolint:gocritic // Use if else chain for clarity
 	if request.Command == protocol.RequestCommandUDP {
-		if s.config.Address != nil {
+		if s.udpAssociate.IsValid() {
+			// If UdpAssociate is explicitly configured, use it as remote address in the response to UdpAssociate
+			responseAddress = s.udpAssociate.Address
+			responsePort = s.udpAssociate.Port
+		} else if s.config.Address != nil {
 			// Use configured IP as remote address in the response to UdpAssociate
 			responseAddress = s.config.Address.AsAddress()
 		} else if s.clientAddress == net.LocalHostIP || s.clientAddress == net.LocalHostIPv6 {
