@@ -67,11 +67,21 @@ func (d *Door) Init(config *Config, pm policy.Manager, sockopt *session.Sockopt)
 
 // Network implements proxy.Inbound.
 func (d *Door) Network() []net.Network {
+	var list []net.Network
 	if len(d.config.Networks) > 0 {
-		return d.config.Networks
+		list = d.config.Networks
+	} else {
+		list = d.config.NetworkList.GetNetwork()
 	}
-
-	return d.config.NetworkList.GetNetwork()
+	for _, network := range list {
+		switch network {
+		case net.Network_TCP:
+			list = append(list, net.Network_UNIX)
+		case net.Network_UDP:
+			list = append(list, net.Network_UNIXGRAM)
+		}
+	}
+	return list
 }
 
 func (d *Door) policy() policy.Session {
