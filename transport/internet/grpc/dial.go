@@ -6,6 +6,7 @@ package grpc
 import (
 	"context"
 	gonet "net"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,8 +95,16 @@ func getGrpcClient(ctx context.Context, dest net.Destination, dialOption grpc.Di
 		return client, canceller, nil
 	}
 
+	var target string
+	switch dest.Network {
+	case net.Network_TCP:
+		target = dest.NetAddr()
+	case net.Network_UNIX:
+		target = "unix://" + dest.NetAddr()
+	}
+
 	conn, err := grpc.Dial(
-		dest.Address.String()+":"+dest.Port.String(),
+		target,
 		dialOption,
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff: backoff.Config{
@@ -107,20 +116,26 @@ func getGrpcClient(ctx context.Context, dest net.Destination, dialOption grpc.Di
 			MinConnectTimeout: 5 * time.Second,
 		}),
 		grpc.WithContextDialer(func(ctxGrpc context.Context, s string) (gonet.Conn, error) {
-			rawHost, rawPort, err := net.SplitHostPort(s)
-			if err != nil {
-				return nil, err
+			var dest net.Destination
+			if strings.HasPrefix(s, "unix://") {
+				dest = net.UnixDestination(net.DomainAddress(s[7:]))
+			} else {
+				rawHost, rawPort, err := net.SplitHostPort(s)
+				if err != nil {
+					return nil, err
+				}
+				if len(rawPort) == 0 {
+					rawPort = "443"
+				}
+				port, err := net.PortFromString(rawPort)
+				if err != nil {
+					return nil, err
+				}
+				address := net.ParseAddress(rawHost)
+				dest = net.TCPDestination(address, port)
 			}
-			if len(rawPort) == 0 {
-				rawPort = "443"
-			}
-			port, err := net.PortFromString(rawPort)
-			if err != nil {
-				return nil, err
-			}
-			address := net.ParseAddress(rawHost)
 			detachedContext := core.ToBackgroundDetachedContext(ctx)
-			return internet.DialSystem(detachedContext, net.TCPDestination(address, port), streamSettings.SocketSettings)
+			return internet.DialSystem(detachedContext, dest, streamSettings.SocketSettings)
 		}),
 	)
 	globalDialerMap[dest] = conn

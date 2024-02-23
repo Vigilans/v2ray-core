@@ -62,6 +62,8 @@ func (c *securityEngineCreds) ClientHandshake(ctx context.Context, authority str
 			c.serverDestination = net.UDPDestination(net.DomainAddress(serverName), port)
 		case "unix":
 			c.serverDestination = net.UnixDestination(net.DomainAddress(serverName))
+		case "unixgram":
+			c.serverDestination = net.UnixgramDestination(net.DomainAddress(serverName))
 		}
 	}
 	var conn security.Conn
