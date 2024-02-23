@@ -9,6 +9,7 @@ import (
 	"github.com/v2fly/v2ray-core/v5/common"
 	"github.com/v2fly/v2ray-core/v5/common/net"
 	"github.com/v2fly/v2ray-core/v5/common/protocol/tls/cert"
+	"github.com/v2fly/v2ray-core/v5/common/session"
 	"github.com/v2fly/v2ray-core/v5/common/signal/done"
 	"github.com/v2fly/v2ray-core/v5/transport/internet"
 	"github.com/v2fly/v2ray-core/v5/transport/internet/tls"
@@ -81,10 +82,6 @@ func (l *Listener) Close() error {
 
 // Listen creates a new Listener based on configurations.
 func Listen(ctx context.Context, address net.Address, port net.Port, streamSettings *internet.MemoryStreamConfig, handler internet.ConnHandler) (internet.Listener, error) {
-	if address.Family().IsDomain() {
-		return nil, newError("domain address is not allows for listening quic")
-	}
-
 	tlsConfig := tls.ConfigFromStreamSettings(streamSettings)
 	if tlsConfig == nil {
 		tlsConfig = &tls.Config{
@@ -93,12 +90,33 @@ func Listen(ctx context.Context, address net.Address, port net.Port, streamSetti
 	}
 
 	config := streamSettings.ProtocolSettings.(*Config)
-	rawConn, err := internet.ListenSystemPacket(context.Background(), &net.UDPAddr{
-		IP:   address.IP(),
-		Port: int(port),
-	}, streamSettings.SocketSettings)
-	if err != nil {
-		return nil, err
+
+	var packetConn net.PacketConn
+	var err error
+	if address.Family().IsDomain() && (address.Domain()[0] == '/' || address.Domain()[0] == '@') && port == net.Port(0) { // unix
+		packetConn, err = internet.ListenSystemPacket(ctx, &net.UnixAddr{
+			Name: address.Domain(),
+			Net:  "unixgram",
+		}, streamSettings.SocketSettings)
+		if err != nil {
+			return nil, newError("failed to listen QUIC on ", address).Base(err)
+		}
+		newError("listening QUIC on ", address).WriteToLog(session.ExportIDToError(ctx))
+	} else if address.Family().IsDomain() {
+		return nil, newError("domain address is not allows for listening quic")
+	} else { // udp
+		packetConn, err = internet.ListenSystemPacket(ctx, &net.UDPAddr{
+			IP:   address.IP(),
+			Port: int(port),
+		}, streamSettings.SocketSettings)
+		if err != nil {
+			return nil, newError("failed to listen QUIC on ", address, ":", port).Base(err)
+		}
+		newError("listening QUIC on ", address, ":", port).WriteToLog(session.ExportIDToError(ctx))
+	}
+	rawConn, ok := packetConn.(syscallPacketConn)
+	if !ok {
+		return nil, newError("returned net.PacketConn is not syscall.Conn or net.conn").Base(err)
 	}
 
 	quicConfig := &quic.Config{
@@ -109,7 +127,7 @@ func Listen(ctx context.Context, address net.Address, port net.Port, streamSetti
 		KeepAlivePeriod:       time.Second * 15,
 	}
 
-	conn, err := wrapSysConn(rawConn.(*net.UDPConn), config)
+	conn, err := wrapSysConn(rawConn, config)
 	if err != nil {
 		conn.Close()
 		return nil, err

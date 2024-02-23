@@ -15,13 +15,20 @@ import (
 	"github.com/v2fly/v2ray-core/v5/transport/internet"
 )
 
+type syscallPacketConn interface {
+	net.PacketConn
+	syscall.Conn
+	SetWriteBuffer(bytes int) error
+	SetReadBuffer(bytes int) error
+}
+
 type sysConn struct {
-	conn   *net.UDPConn
+	conn   syscallPacketConn
 	header internet.PacketHeader
 	auth   cipher.AEAD
 }
 
-func wrapSysConn(rawConn *net.UDPConn, config *Config) (*sysConn, error) {
+func wrapSysConn(rawConn syscallPacketConn, config *Config) (*sysConn, error) {
 	header, err := getHeader(config)
 	if err != nil {
 		return nil, err

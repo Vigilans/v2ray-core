@@ -2,6 +2,7 @@ package quic
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/v2fly/v2ray-core/v5/common"
 	"github.com/v2fly/v2ray-core/v5/common/net"
 	"github.com/v2fly/v2ray-core/v5/common/task"
+	"github.com/v2fly/v2ray-core/v5/common/uuid"
 	"github.com/v2fly/v2ray-core/v5/transport/internet"
 	"github.com/v2fly/v2ray-core/v5/transport/internet/tls"
 )
@@ -115,7 +117,7 @@ func (s *clientConnections) cleanConnections() error {
 	return nil
 }
 
-func (s *clientConnections) openConnection(destAddr net.Addr, config *Config, tlsConfig *tls.Config, sockopt *internet.SocketConfig) (internet.Connection, error) {
+func (s *clientConnections) openConnection(dest net.Destination, config *Config, tlsConfig *tls.Config, sockopt *internet.SocketConfig) (internet.Connection, error) {
 	s.access.Lock()
 	defer s.access.Unlock()
 
@@ -123,7 +125,7 @@ func (s *clientConnections) openConnection(destAddr net.Addr, config *Config, tl
 		s.conns = make(map[net.Destination][]*connectionContext)
 	}
 
-	dest := net.DestinationFromAddr(destAddr)
+	destAddr := dest.AsAddr()
 
 	var conns []*connectionContext
 	if s, found := s.conns[dest]; found {
@@ -141,12 +143,26 @@ func (s *clientConnections) openConnection(destAddr net.Addr, config *Config, tl
 
 	newError("dialing QUIC to ", dest).WriteToLog()
 
-	rawConn, err := internet.ListenSystemPacket(context.Background(), &net.UDPAddr{
-		IP:   []byte{0, 0, 0, 0},
-		Port: 0,
-	}, sockopt)
-	if err != nil {
-		return nil, err
+	var packetConn net.PacketConn
+	var err error
+	if dest.Network == net.Network_UNIXGRAM {
+		uuid := uuid.New()
+		packetConn, err = internet.ListenSystemPacket(context.Background(), &net.UnixAddr{
+			Name: fmt.Sprintf("@v2ray/dialer/%s", uuid.String()),
+			Net:  "unixgram",
+		}, sockopt)
+	} else {
+		packetConn, err = internet.ListenSystemPacket(context.Background(), &net.UDPAddr{
+			IP:   []byte{0, 0, 0, 0},
+			Port: 0,
+		}, sockopt)
+		if err != nil {
+			return nil, err
+		}
+	}
+	rawConn, ok := packetConn.(syscallPacketConn)
+	if !ok {
+		return nil, newError("returned net.PacketConn is not syscall.Conn or net.conn").Base(err)
 	}
 
 	quicConfig := &quic.Config{
@@ -155,7 +171,7 @@ func (s *clientConnections) openConnection(destAddr net.Addr, config *Config, tl
 		KeepAlivePeriod:      time.Second * 15,
 	}
 
-	sysConn, err := wrapSysConn(rawConn.(*net.UDPConn), config)
+	sysConn, err := wrapSysConn(rawConn, config)
 	if err != nil {
 		rawConn.Close()
 		return nil, err
@@ -200,23 +216,25 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 		}
 	}
 
-	var destAddr *net.UDPAddr
-	if dest.Address.Family().IsIP() {
-		destAddr = &net.UDPAddr{
-			IP:   dest.Address.IP(),
-			Port: int(dest.Port),
-		}
-	} else {
+	switch dest.Network {
+	case net.Network_TCP:
+		dest.Network = net.Network_UDP
+	case net.Network_UNIX:
+		dest.Network = net.Network_UNIXGRAM
+	default:
+		dest.Network = net.Network_UDP
+	}
+	if dest.Network == net.Network_UDP && dest.Address.Family().IsDomain() {
 		addr, err := net.ResolveUDPAddr("udp", dest.NetAddr())
 		if err != nil {
 			return nil, err
 		}
-		destAddr = addr
+		dest = net.DestinationFromAddr(addr)
 	}
 
 	config := streamSettings.ProtocolSettings.(*Config)
 
-	return client.openConnection(destAddr, config, tlsConfig, streamSettings.SocketSettings)
+	return client.openConnection(dest, config, tlsConfig, streamSettings.SocketSettings)
 }
 
 func init() {
