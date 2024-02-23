@@ -55,7 +55,7 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *MemoryStrea
 		return dialer(ctx, dest, streamSettings)
 	}
 
-	if dest.Network == net.Network_UDP {
+	if dest.Network == net.Network_UDP || dest.Network == net.Network_UNIXGRAM {
 		udpDialer := transportDialerCache["udp"]
 		if udpDialer == nil {
 			return nil, newError("UDP dialer not registered").AtError()

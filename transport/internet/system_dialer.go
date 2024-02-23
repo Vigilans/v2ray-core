@@ -2,11 +2,13 @@ package internet
 
 import (
 	"context"
+	"fmt"
 	"syscall"
 	"time"
 
 	"github.com/v2fly/v2ray-core/v5/common/net"
 	"github.com/v2fly/v2ray-core/v5/common/session"
+	"github.com/v2fly/v2ray-core/v5/common/uuid"
 )
 
 var effectiveSystemDialer SystemDialer = &DefaultSystemDialer{}
@@ -24,16 +26,29 @@ func resolveSrcAddr(network net.Network, src net.Address) net.Addr {
 		return nil
 	}
 
-	if network == net.Network_TCP {
+	switch network {
+	case net.Network_TCP:
 		return &net.TCPAddr{
 			IP:   src.IP(),
 			Port: 0,
 		}
-	}
-
-	return &net.UDPAddr{
-		IP:   src.IP(),
-		Port: 0,
+	case net.Network_UDP:
+		return &net.UDPAddr{
+			IP:   src.IP(),
+			Port: 0,
+		}
+	case net.Network_UNIX:
+		return &net.UnixAddr{
+			Name: src.Domain(),
+			Net:  "unix",
+		}
+	case net.Network_UNIXGRAM:
+		return &net.UnixAddr{
+			Name: src.Domain(),
+			Net:  "unixgram",
+		}
+	default:
+		return nil
 	}
 }
 
@@ -42,27 +57,40 @@ func hasBindAddr(sockopt *SocketConfig) bool {
 }
 
 func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest net.Destination, sockopt *SocketConfig) (net.Conn, error) {
-	if dest.Network == net.Network_UDP && !hasBindAddr(sockopt) {
-		srcAddr := resolveSrcAddr(net.Network_UDP, src)
-		if srcAddr == nil {
-			srcAddr = &net.UDPAddr{
-				IP:   []byte{0, 0, 0, 0},
-				Port: 0,
+	if (dest.Network == net.Network_UDP && !hasBindAddr(sockopt)) || dest.Network == net.Network_UNIXGRAM {
+		var srcAddr, dstAddr net.Addr
+		var err error
+		switch dest.Network {
+		case net.Network_UDP:
+			srcAddr = resolveSrcAddr(dest.Network, src)
+			if srcAddr == nil {
+				srcAddr = &net.UDPAddr{IP: []byte{0, 0, 0, 0}, Port: 0}
+			}
+			dstAddr, err = net.ResolveUDPAddr("udp", dest.NetAddr())
+			if err != nil {
+				return nil, err
+			}
+		case net.Network_UNIXGRAM:
+			srcAddr = resolveSrcAddr(dest.Network, src)
+			if srcAddr == nil {
+				uuid := uuid.New()
+				srcAddr = &net.UnixAddr{Name: fmt.Sprintf("@v2ray/dialer/%s", uuid.String()), Net: "unixgram"}
+			}
+			dstAddr, err = net.ResolveUnixAddr("unixgram", dest.NetAddr())
+			if err != nil {
+				return nil, err
 			}
 		}
 		packetConn, err := ListenSystemPacket(ctx, srcAddr, sockopt)
 		if err != nil {
 			return nil, err
 		}
-		destAddr, err := net.ResolveUDPAddr("udp", dest.NetAddr())
-		if err != nil {
-			return nil, err
-		}
 		return &packetConnWrapper{
 			conn: packetConn,
-			dest: destAddr,
+			dest: dstAddr,
 		}, nil
 	}
+
 	goStdKeepAlive := time.Duration(0)
 	if sockopt != nil && (sockopt.TcpKeepAliveInterval != 0 || sockopt.TcpKeepAliveIdle != 0) {
 		goStdKeepAlive = time.Duration(-1)
