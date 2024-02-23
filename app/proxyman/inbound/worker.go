@@ -197,6 +197,14 @@ func (w *tcpWorker) Port() net.Port {
 	return w.port
 }
 
+func (w *tcpWorker) NetAddr() net.Addr {
+	if w.address.Family().IsDomain() && w.port == net.Port(0) {
+		return &net.UnixAddr{Name: w.address.Domain(), Net: "unix"}
+	} else {
+		return &net.TCPAddr{IP: w.address.IP(), Port: int(w.port)}
+	}
+}
+
 type udpConn struct {
 	lastActivityTime int64 // in seconds
 	reader           buf.Reader
@@ -315,24 +323,15 @@ func (w *udpWorker) getConnection(id connID) (*udpConn, bool) {
 		output: func(b []byte) (int, error) {
 			return w.hub.WriteTo(b, id.src)
 		},
-		remote: &net.UDPAddr{
-			IP:   id.src.Address.IP(),
-			Port: int(id.src.Port),
-		},
+		remote:   id.src.AsAddr(),
 		done:     done.New(),
 		uplink:   w.uplinkCounter,
 		downlink: w.downlinkCounter,
 	}
 	if id.dest.IsValid() {
-		conn.local = &net.UDPAddr{
-			IP:   id.dest.Address.IP(),
-			Port: int(id.dest.Port),
-		}
+		conn.local = id.dest.AsAddr()
 	} else {
-		conn.local = &net.UDPAddr{
-			IP:   w.address.IP(),
-			Port: int(w.port),
-		}
+		conn.local = w.NetAddr()
 	}
 	w.activeConn[id] = conn
 
@@ -511,93 +510,10 @@ func (w *udpWorker) Proxy() proxy.Inbound {
 	return w.proxy
 }
 
-type dsWorker struct {
-	address         net.Address
-	proxy           proxy.Inbound
-	stream          *internet.MemoryStreamConfig
-	tag             string
-	dispatcher      routing.Dispatcher
-	sniffingConfig  *proxyman.SniffingConfig
-	uplinkCounter   stats.Counter
-	downlinkCounter stats.Counter
-
-	hub internet.Listener
-
-	ctx context.Context
-}
-
-func (w *dsWorker) callback(conn internet.Connection) {
-	ctx, cancel := context.WithCancel(w.ctx)
-	sid := session.NewID()
-	ctx = session.ContextWithID(ctx, sid)
-
-	ctx = session.ContextWithInbound(ctx, &session.Inbound{
-		Source:  net.DestinationFromAddr(conn.RemoteAddr()),
-		Gateway: net.UnixDestination(w.address),
-		Tag:     w.tag,
-	})
-	content := new(session.Content)
-	if w.sniffingConfig != nil {
-		content.SniffingRequest.Enabled = w.sniffingConfig.Enabled
-		content.SniffingRequest.OverrideDestinationForProtocol = w.sniffingConfig.DestinationOverride
-		content.SniffingRequest.MetadataOnly = w.sniffingConfig.MetadataOnly
+func (w *udpWorker) NetAddr() net.Addr {
+	if w.address.Family().IsDomain() && w.port == net.Port(0) {
+		return &net.UnixAddr{Name: w.address.Domain(), Net: "unixgram"}
+	} else {
+		return &net.UDPAddr{IP: w.address.IP(), Port: int(w.port)}
 	}
-	ctx = session.ContextWithContent(ctx, content)
-	if w.uplinkCounter != nil || w.downlinkCounter != nil {
-		conn = &internet.StatCouterConnection{
-			Connection:   conn,
-			ReadCounter:  w.uplinkCounter,
-			WriteCounter: w.downlinkCounter,
-		}
-	}
-	if err := w.proxy.Process(ctx, net.Network_UNIX, conn, w.dispatcher); err != nil {
-		newError("connection ends").Base(err).WriteToLog(session.ExportIDToError(ctx))
-	}
-	cancel()
-	if err := conn.Close(); err != nil {
-		newError("failed to close connection").Base(err).WriteToLog(session.ExportIDToError(ctx))
-	}
-}
-
-func (w *dsWorker) Proxy() proxy.Inbound {
-	return w.proxy
-}
-
-func (w *dsWorker) Port() net.Port {
-	return net.Port(0)
-}
-
-func (w *dsWorker) Start() error {
-	ctx := context.Background()
-	proxyEnvironment := envctx.EnvironmentFromContext(w.ctx).(environment.ProxyEnvironment)
-	transportEnvironment, err := proxyEnvironment.NarrowScopeToTransport("transport")
-	if err != nil {
-		return newError("unable to narrow environment to transport").Base(err)
-	}
-	ctx = envctx.ContextWithEnvironment(ctx, transportEnvironment)
-	hub, err := internet.ListenUnix(ctx, w.address, w.stream, func(conn internet.Connection) {
-		go w.callback(conn)
-	})
-	if err != nil {
-		return newError("failed to listen Unix Domain Socket on ", w.address).AtWarning().Base(err)
-	}
-	w.hub = hub
-	return nil
-}
-
-func (w *dsWorker) Close() error {
-	var errors []interface{}
-	if w.hub != nil {
-		if err := common.Close(w.hub); err != nil {
-			errors = append(errors, err)
-		}
-		if err := common.Close(w.proxy); err != nil {
-			errors = append(errors, err)
-		}
-	}
-	if len(errors) > 0 {
-		return newError("failed to close all resources").Base(newError(serial.Concat(errors...)))
-	}
-
-	return nil
 }

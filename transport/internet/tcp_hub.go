@@ -25,33 +25,6 @@ type Listener interface {
 	Addr() net.Addr
 }
 
-// ListenUnix is the UDS version of ListenTCP
-func ListenUnix(ctx context.Context, address net.Address, settings *MemoryStreamConfig, handler ConnHandler) (Listener, error) {
-	if settings == nil {
-		s, err := ToMemoryStreamConfig(nil)
-		if err != nil {
-			return nil, newError("failed to create default unix stream settings").Base(err)
-		}
-		settings = s
-	}
-
-	protocol := settings.ProtocolName
-
-	if originalProtocolName := getOriginalMessageName(settings); originalProtocolName != "" {
-		protocol = originalProtocolName
-	}
-
-	listenFunc := transportListenerCache[protocol]
-	if listenFunc == nil {
-		return nil, newError(protocol, " unix istener not registered.").AtError()
-	}
-	listener, err := listenFunc(ctx, address, net.Port(0), settings, handler)
-	if err != nil {
-		return nil, newError("failed to listen on unix address: ", address).Base(err)
-	}
-	return listener, nil
-}
-
 func ListenTCP(ctx context.Context, address net.Address, port net.Port, settings *MemoryStreamConfig, handler ConnHandler) (Listener, error) {
 	if settings == nil {
 		s, err := ToMemoryStreamConfig(nil)
@@ -61,12 +34,12 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, settings
 		settings = s
 	}
 
-	if address.Family().IsDomain() && address.Domain() == "localhost" {
-		address = net.LocalHostIP
-	}
-
 	if address.Family().IsDomain() {
-		return nil, newError("domain address is not allowed for listening: ", address.Domain())
+		if address.Domain() == "localhost" { // tcp
+			address = net.LocalHostIP
+		} else if port != net.Port(0) { // not unix
+			return nil, newError("domain address is not allowed for tcp listening: ", address.Domain())
+		}
 	}
 
 	protocol := settings.ProtocolName

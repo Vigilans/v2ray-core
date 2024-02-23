@@ -66,8 +66,8 @@ func NewAlwaysOnInboundHandler(ctx context.Context, tag string, receiverConfig *
 
 	uplinkCounter, downlinkCounter := getStatCounter(core.MustFromContext(ctx), tag)
 
-	nl := p.Network()
-	pr := receiverConfig.PortRange
+	network := p.Network()
+	portRange := receiverConfig.PortRange
 	address := receiverConfig.Listen.AsAddress()
 	if address == nil {
 		address = net.AnyIP
@@ -78,12 +78,45 @@ func NewAlwaysOnInboundHandler(ctx context.Context, tag string, receiverConfig *
 		return nil, newError("failed to parse stream config").Base(err).AtWarning()
 	}
 
-	if pr == nil {
-		if net.HasNetwork(nl, net.Network_UNIX) {
-			newError("creating unix domain socket worker on ", address).AtDebug().WriteToLog()
+	newWorker := func(listenOn net.Destination) worker {
+		switch listenOn.Network {
+		case net.Network_TCP:
+			newError("creating tcp worker on ", listenOn.NetAddr()).AtDebug().WriteToLog()
 
-			worker := &dsWorker{
-				address:         address,
+			return &tcpWorker{
+				address:         listenOn.Address,
+				port:            listenOn.Port,
+				proxy:           p,
+				stream:          mss,
+				recvOrigDest:    receiverConfig.ReceiveOriginalDestination,
+				tag:             tag,
+				dispatcher:      h.mux,
+				sniffingConfig:  receiverConfig.GetEffectiveSniffingSettings(),
+				uplinkCounter:   uplinkCounter,
+				downlinkCounter: downlinkCounter,
+				ctx:             ctx,
+			}
+		case net.Network_UDP:
+			newError("creating udp worker on ", listenOn.NetAddr()).AtDebug().WriteToLog()
+
+			return &udpWorker{
+				ctx:             ctx,
+				tag:             tag,
+				proxy:           p,
+				address:         listenOn.Address,
+				port:            listenOn.Port,
+				dispatcher:      h.mux,
+				sniffingConfig:  receiverConfig.GetEffectiveSniffingSettings(),
+				uplinkCounter:   uplinkCounter,
+				downlinkCounter: downlinkCounter,
+				stream:          mss,
+			}
+		case net.Network_UNIX:
+			newError("creating unix domain socket worker on ", listenOn.NetAddr()).AtDebug().WriteToLog()
+
+			return &tcpWorker{
+				address:         listenOn.Address,
+				port:            net.Port(0),
 				proxy:           p,
 				stream:          mss,
 				tag:             tag,
@@ -93,46 +126,45 @@ func NewAlwaysOnInboundHandler(ctx context.Context, tag string, receiverConfig *
 				downlinkCounter: downlinkCounter,
 				ctx:             ctx,
 			}
-			h.workers = append(h.workers, worker)
+		case net.Network_UNIXGRAM:
+			newError("creating unixgram domain socket worker on ", listenOn.NetAddr()).AtDebug().WriteToLog()
+
+			return &udpWorker{
+				ctx:             ctx,
+				tag:             tag,
+				proxy:           p,
+				address:         listenOn.Address,
+				port:            net.Port(0),
+				dispatcher:      h.mux,
+				sniffingConfig:  receiverConfig.GetEffectiveSniffingSettings(),
+				uplinkCounter:   uplinkCounter,
+				downlinkCounter: downlinkCounter,
+				stream:          mss,
+			}
+		}
+		return nil
+	}
+
+	receivers := make([]net.Destination, 0)
+	if portRange != nil {
+		for port := portRange.From; port <= portRange.To; port++ {
+			if net.HasNetwork(network, net.Network_TCP) {
+				receivers = append(receivers, net.TCPDestination(address, net.Port(port)))
+			}
+			if net.HasNetwork(network, net.Network_UDP) {
+				receivers = append(receivers, net.UDPDestination(address, net.Port(port)))
+			}
+		}
+	} else {
+		if net.HasNetwork(network, net.Network_UNIX) {
+			receivers = append(receivers, net.UnixDestination(address))
+		} else if net.HasNetwork(network, net.Network_UNIXGRAM) { // `unixgram` will be used on domain socket only if `unix` is not used, since `unix` and `unixgram` cannot be applied on same file
+			receivers = append(receivers, net.UnixgramDestination(address))
 		}
 	}
-	if pr != nil {
-		for port := pr.From; port <= pr.To; port++ {
-			if net.HasNetwork(nl, net.Network_TCP) {
-				newError("creating stream worker on ", address, ":", port).AtDebug().WriteToLog()
 
-				worker := &tcpWorker{
-					address:         address,
-					port:            net.Port(port),
-					proxy:           p,
-					stream:          mss,
-					recvOrigDest:    receiverConfig.ReceiveOriginalDestination,
-					tag:             tag,
-					dispatcher:      h.mux,
-					sniffingConfig:  receiverConfig.GetEffectiveSniffingSettings(),
-					uplinkCounter:   uplinkCounter,
-					downlinkCounter: downlinkCounter,
-					ctx:             ctx,
-				}
-				h.workers = append(h.workers, worker)
-			}
-
-			if net.HasNetwork(nl, net.Network_UDP) {
-				worker := &udpWorker{
-					ctx:             ctx,
-					tag:             tag,
-					proxy:           p,
-					address:         address,
-					port:            net.Port(port),
-					dispatcher:      h.mux,
-					sniffingConfig:  receiverConfig.GetEffectiveSniffingSettings(),
-					uplinkCounter:   uplinkCounter,
-					downlinkCounter: downlinkCounter,
-					stream:          mss,
-				}
-				h.workers = append(h.workers, worker)
-			}
-		}
+	for _, receiver := range receivers {
+		h.workers = append(h.workers, newWorker(receiver))
 	}
 
 	return h, nil
