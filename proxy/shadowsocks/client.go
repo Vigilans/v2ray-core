@@ -2,6 +2,7 @@ package shadowsocks
 
 import (
 	"context"
+	"fmt"
 
 	core "github.com/v2fly/v2ray-core/v5"
 	"github.com/v2fly/v2ray-core/v5/common"
@@ -63,7 +64,14 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	err := retry.ExponentialBackoff(5, 100).On(func() error {
 		server = c.serverPicker.PickServer()
 		dest := server.Destination()
-		dest.Network = network
+		switch dest.Network {
+		case net.Network_TCP:
+			dest.Network = network
+		case net.Network_UNIX:
+			if network == net.Network_UDP { // Shadowsocks does not have UDP associate, can only hard code here
+				dest = net.UnixgramDestination(net.DomainAddress(fmt.Sprintf("@udp%s", dest.Address.Domain())))
+			}
+		}
 		rawConn, err := dialer.Dial(ctx, dest)
 		if err != nil {
 			return err

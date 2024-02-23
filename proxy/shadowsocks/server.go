@@ -2,6 +2,7 @@ package shadowsocks
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	core "github.com/v2fly/v2ray-core/v5"
@@ -25,6 +26,7 @@ type Server struct {
 	config        *ServerConfig
 	user          *protocol.MemoryUser
 	policyManager policy.Manager
+	udpAssociate  net.Destination
 }
 
 // NewServer create a new Shadowsocks server.
@@ -56,7 +58,31 @@ func (s *Server) Network() []net.Network {
 	if s.config.UdpEnabled {
 		list = append(list, net.Network_UDP)
 	}
+	for _, network := range list {
+		switch network {
+		case net.Network_TCP:
+			list = append(list, net.Network_UNIX)
+		case net.Network_UDP:
+			list = append(list, net.Network_UNIXGRAM)
+		}
+	}
 	return list
+}
+
+// ProcessReceivers implements proxy.ProcessReceivers.
+func (s *Server) ProcessReceivers(baseReceivers []net.Destination) []net.Destination {
+	receivers := []net.Destination{}
+	for _, receiver := range baseReceivers {
+		receivers = append(receivers, receiver)
+		// If this receiver is listening on a UNIX domain socket, and UDP is enabled,
+		// We use an abstract unix path as the UDP receiver by prefixing the receiver path with @udp.
+		if receiver.Network == net.Network_UNIX && net.HasNetwork(s.Network(), net.Network_UDP) {
+			s.udpAssociate = net.UnixgramDestination(net.DomainAddress(fmt.Sprintf("@udp%s", receiver.NetAddr())))
+			receivers = append(receivers, s.udpAssociate)
+			break
+		}
+	}
+	return receivers
 }
 
 func (s *Server) Process(ctx context.Context, network net.Network, conn internet.Connection, dispatcher routing.Dispatcher) error {
