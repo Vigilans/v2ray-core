@@ -6,6 +6,7 @@ import (
 	gonet "net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	"golang.org/x/net/http2"
@@ -46,21 +47,27 @@ func getHTTPClient(ctx context.Context, dest net.Destination, securityEngine *se
 
 	transport := &http2.Transport{
 		DialTLSContext: func(_ context.Context, network, addr string, tlsConfig *gotls.Config) (gonet.Conn, error) {
-			rawHost, rawPort, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, err
+			var dest net.Destination
+			if strings.HasPrefix(addr, "unix://") {
+				dest = net.UnixDestination(net.DomainAddress(addr[7:]))
+			} else {
+				rawHost, rawPort, err := net.SplitHostPort(addr)
+				if err != nil {
+					return nil, err
+				}
+				if len(rawPort) == 0 {
+					rawPort = "443"
+				}
+				port, err := net.PortFromString(rawPort)
+				if err != nil {
+					return nil, err
+				}
+				address := net.ParseAddress(rawHost)
+				dest = net.TCPDestination(address, port)
 			}
-			if len(rawPort) == 0 {
-				rawPort = "443"
-			}
-			port, err := net.PortFromString(rawPort)
-			if err != nil {
-				return nil, err
-			}
-			address := net.ParseAddress(rawHost)
 
 			detachedContext := core.ToBackgroundDetachedContext(ctx)
-			pconn, err := internet.DialSystem(detachedContext, net.TCPDestination(address, port), streamSettings.SocketSettings)
+			pconn, err := internet.DialSystem(detachedContext, dest, streamSettings.SocketSettings)
 			if err != nil {
 				return nil, err
 			}
@@ -124,13 +131,21 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 		}
 	}
 
+	var target string
+	switch dest.Network {
+	case net.Network_TCP:
+		target = dest.NetAddr()
+	case net.Network_UNIX:
+		target = "unix://" + dest.NetAddr()
+	}
+
 	request := &http.Request{
 		Method: httpMethod,
 		Host:   httpSettings.getRandomHost(),
 		Body:   breader,
 		URL: &url.URL{
 			Scheme: "https",
-			Host:   dest.NetAddr(),
+			Host:   target,
 			Path:   httpSettings.getNormalizedPath(),
 		},
 		Proto:      "HTTP/2",
