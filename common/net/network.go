@@ -15,6 +15,8 @@ func (n Network) SystemString() string {
 		return "udp"
 	case Network_UNIX:
 		return "unix"
+	case Network_UNIXGRAM:
+		return "unixgram"
 	default:
 		return "unknown"
 	}
@@ -55,6 +57,8 @@ func ParseNetwork(net string) Network {
 		return Network_UDP
 	case "unix":
 		return Network_UNIX
+	case "unixgram":
+		return Network_UNIXGRAM
 	default:
 		return Network_Unknown
 	}

@@ -20,7 +20,16 @@ func DestinationFromAddr(addr net.Addr) Destination {
 	case *net.UDPAddr:
 		return UDPDestination(IPAddress(addr.IP), Port(addr.Port))
 	case *net.UnixAddr:
-		return UnixDestination(DomainAddress(addr.Name))
+		switch addr.Net {
+		case "unix":
+			return UnixDestination(DomainAddress(addr.Name))
+		case "unixgram":
+			return UnixgramDestination(DomainAddress(addr.Name))
+		case "unixpacket":
+			panic("Net: unixpacket is not supported now.")
+		default:
+			panic("Net: Unknown address type.")
+		}
 	default:
 		panic("Net: Unknown address type.")
 	}
@@ -42,6 +51,9 @@ func ParseDestination(dest string) (Destination, error) {
 		dest = dest[4:]
 	case strings.HasPrefix(dest, "unix:"):
 		d = UnixDestination(DomainAddress(dest[5:]))
+		return d, nil
+	case strings.HasPrefix(dest, "unixgram:"):
+		d = UnixgramDestination(DomainAddress(dest[9:]))
 		return d, nil
 	}
 
@@ -88,12 +100,20 @@ func UnixDestination(address Address) Destination {
 	}
 }
 
+// UnixgramDestination creates a Unixgram destination with given address
+func UnixgramDestination(address Address) Destination {
+	return Destination{
+		Network: Network_UNIXGRAM,
+		Address: address,
+	}
+}
+
 // NetAddr returns the network address in this Destination in string form.
 func (d Destination) NetAddr() string {
 	addr := ""
 	if d.Network == Network_TCP || d.Network == Network_UDP {
 		addr = d.Address.String() + ":" + d.Port.String()
-	} else if d.Network == Network_UNIX {
+	} else if d.Network == Network_UNIX || d.Network == Network_UNIXGRAM {
 		addr = d.Address.String()
 	}
 	return addr
@@ -109,6 +129,8 @@ func (d Destination) String() string {
 		prefix = "udp:"
 	case Network_UNIX:
 		prefix = "unix:"
+	case Network_UNIXGRAM:
+		prefix = "unixgram:"
 	}
 	return prefix + d.NetAddr()
 }
@@ -116,6 +138,34 @@ func (d Destination) String() string {
 // IsValid returns true if this Destination is valid.
 func (d Destination) IsValid() bool {
 	return d.Network != Network_Unknown
+}
+
+// AsAddr converts Destination into net.Addr
+func (d Destination) AsAddr() net.Addr {
+	switch d.Network {
+	case Network_TCP:
+		return &net.TCPAddr{
+			IP:   d.Address.IP(),
+			Port: int(d.Port),
+		}
+	case Network_UDP:
+		return &net.UDPAddr{
+			IP:   d.Address.IP(),
+			Port: int(d.Port),
+		}
+	case Network_UNIX:
+		return &net.UnixAddr{
+			Name: d.Address.Domain(),
+			Net:  "unix",
+		}
+	case Network_UNIXGRAM:
+		return &net.UnixAddr{
+			Name: d.Address.Domain(),
+			Net:  "unixgram",
+		}
+	default:
+		return nil
+	}
 }
 
 // AsDestination converts current Endpoint into Destination.
