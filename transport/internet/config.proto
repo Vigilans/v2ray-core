@@ -103,4 +103,12 @@ message SocketConfig {
   int64 rx_buf_size = 12;
   int64 tx_buf_size = 13;
   bool force_buf_size = 14;
+
+  enum ListenStrategy {
+    USE_IP = 0;
+    USE_IP4 = 1;
+    USE_IP6 = 2;
+  }
+
+  ListenStrategy listen_strategy = 15;
 }

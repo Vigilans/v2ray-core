@@ -87,6 +87,14 @@ func (dl *DefaultListener) Listen(ctx context.Context, addr net.Addr, sockopt *S
 	switch addr := addr.(type) {
 	case *net.TCPAddr:
 		network = addr.Network()
+		if sockopt != nil && sockopt.ListenStrategy != SocketConfig_USE_IP {
+			switch sockopt.ListenStrategy {
+			case SocketConfig_USE_IP4:
+				network = "tcp4"
+			case SocketConfig_USE_IP6:
+				network = "tcp6"
+			}
+		}
 		address = addr.String()
 		lc.Control = getControlFunc(ctx, sockopt, dl.controllers)
 		if sockopt != nil && (sockopt.TcpKeepAliveInterval != 0 || sockopt.TcpKeepAliveIdle != 0) {
@@ -169,6 +177,14 @@ func (dl *DefaultListener) ListenPacket(ctx context.Context, addr net.Addr, sock
 	switch addr := addr.(type) {
 	case *net.UDPAddr:
 		network = addr.Network()
+		if sockopt != nil && sockopt.ListenStrategy != SocketConfig_USE_IP {
+			switch sockopt.ListenStrategy {
+			case SocketConfig_USE_IP4:
+				network = "udp4"
+			case SocketConfig_USE_IP6:
+				network = "udp6"
+			}
+		}
 		address = addr.String()
 		lc.Control = getControlFunc(ctx, sockopt, dl.controllers)
 	case *net.UnixAddr:
