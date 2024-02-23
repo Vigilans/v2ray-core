@@ -19,5 +19,6 @@ func PrintDeprecatedFeatureWarning(feature string) {
 // TaggedFeatures unstable
 type TaggedFeatures interface {
 	GetFeaturesByTag(tag string) (Feature, error)
+	GetFeaturesTag() ([]string, error)
 	common.Runnable
 }

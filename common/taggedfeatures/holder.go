@@ -30,7 +30,7 @@ func (h *Holder) GetFeaturesByTag(tag string) (features.Feature, error) {
 	defer h.access.RUnlock()
 	feature, ok := h.features[tag]
 	if !ok {
-		return nil, newError("unable to find feature with tag")
+		return nil, newError("unable to find feature with tag ", tag)
 	}
 	return feature, nil
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 
+	"github.com/v2fly/v2ray-core/v5/app/observatory"
 	"github.com/v2fly/v2ray-core/v5/common"
 	"github.com/v2fly/v2ray-core/v5/common/taggedfeatures"
 	"github.com/v2fly/v2ray-core/v5/features"
@@ -19,7 +20,23 @@ type Observer struct {
 }
 
 func (o Observer) GetObservation(ctx context.Context) (proto.Message, error) {
-	return common.Must2(o.GetFeaturesByTag("")).(extension.Observatory).GetObservation(ctx)
+	tags, err := o.GetFeaturesTag()
+	if err != nil {
+		return nil, err
+	}
+	results := &observatory.ObservationResult{}
+	for _, tag := range tags {
+		feature, err := o.GetFeaturesByTag(tag)
+		if err != nil {
+			return nil, err
+		}
+		observeResult, err := feature.(extension.Observatory).GetObservation(ctx)
+		if err != nil {
+			return nil, err
+		}
+		results.Status = append(results.Status, observeResult.(*observatory.ObservationResult).Status...)
+	}
+	return results, nil
 }
 
 func (o Observer) Type() interface{} {
