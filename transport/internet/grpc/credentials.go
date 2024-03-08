@@ -77,11 +77,15 @@ func (c *securityEngineCreds) ClientHandshake(ctx context.Context, authority str
 	select {
 	case err := <-errChannel:
 		if err != nil {
-			conn.Close()
+			if conn != nil {
+				conn.Close()
+			}
 			return nil, nil, err
 		}
 	case <-ctx.Done():
-		conn.Close()
+		if conn != nil {
+			conn.Close()
+		}
 		return nil, nil, ctx.Err()
 	}
 	authInfo := securityEngineAuthInfo{
