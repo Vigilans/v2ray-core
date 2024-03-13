@@ -48,23 +48,28 @@ func (c securityEngineCreds) Info() credentials.ProtocolInfo {
 
 // ClientHandshake implements credentials.TransportCredentials.
 func (c *securityEngineCreds) ClientHandshake(ctx context.Context, authority string, rawConn net.Conn) (_ net.Conn, _ credentials.AuthInfo, err error) {
+	serverName, serverPort, err := net.SplitHostPort(authority)
+	if err != nil {
+		// If the authority had no host port or if the authority cannot be parsed, use it as-is.
+		serverName = authority
+	}
+	// ServerName set by user in TLS config takes priority
+	if c.serverDestination.Address.Family().IsDomain() && c.serverDestination.Address.Domain() != "" {
+		serverName = c.serverDestination.Address.Domain()
+	}
+	port, _ := net.PortFromString(serverPort)
+	switch rawConn.LocalAddr().Network() {
+	case "tcp", "tcp4", "tcp6":
+		c.serverDestination = net.TCPDestination(net.DomainAddress(serverName), port)
+	case "udp", "udp4", "udp6":
+		c.serverDestination = net.UDPDestination(net.DomainAddress(serverName), port)
+	case "unix":
+		c.serverDestination = net.UnixDestination(net.DomainAddress(serverName))
+	case "unixgram":
+		c.serverDestination = net.UnixgramDestination(net.DomainAddress(serverName))
+	}
 	if !c.serverDestination.IsValid() {
-		serverName, serverPort, err := net.SplitHostPort(authority)
-		if err != nil {
-			// If the authority had no host port or if the authority cannot be parsed, use it as-is.
-			serverName = authority
-		}
-		port, _ := net.PortFromString(serverPort)
-		switch rawConn.LocalAddr().Network() {
-		case "tcp", "tcp4", "tcp6":
-			c.serverDestination = net.TCPDestination(net.DomainAddress(serverName), port)
-		case "udp", "udp4", "udp6":
-			c.serverDestination = net.UDPDestination(net.DomainAddress(serverName), port)
-		case "unix":
-			c.serverDestination = net.UnixDestination(net.DomainAddress(serverName))
-		case "unixgram":
-			c.serverDestination = net.UnixgramDestination(net.DomainAddress(serverName))
-		}
+
 	}
 	var conn security.Conn
 	errChannel := make(chan error, 1)
