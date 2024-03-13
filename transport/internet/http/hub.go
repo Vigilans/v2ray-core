@@ -86,13 +86,15 @@ func (l *Listener) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 	}
 
 	remoteAddr := l.Addr()
-	dest, err := net.ParseDestination(request.RemoteAddr)
-	if err != nil {
-		newError("failed to parse request remote addr: ", request.RemoteAddr).Base(err).WriteToLog()
-	} else {
-		remoteAddr = &net.TCPAddr{
-			IP:   dest.Address.IP(),
-			Port: int(dest.Port),
+	if request.RemoteAddr[0] != '/' && request.RemoteAddr[0] != '@' {
+		dest, err := net.ParseDestination(request.RemoteAddr)
+		if err != nil {
+			newError("failed to parse request remote addr: ", request.RemoteAddr).Base(err).WriteToLog()
+		} else {
+			remoteAddr = &net.TCPAddr{
+				IP:   dest.Address.IP(),
+				Port: int(dest.Port),
+			}
 		}
 	}
 
