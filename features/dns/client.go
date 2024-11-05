@@ -83,7 +83,10 @@ func ClientType() interface{} {
 	return (*Client)(nil)
 }
 
-// ErrEmptyResponse indicates that DNS query succeeded but no answer was returned.
+// ErrTruncatedResponse indicates that DNS response is truncated (TC flag in response header is set)
+var ErrTruncatedResponse = errors.New("truncated response")
+
+// ErrEmptyResponse indicates that DNS query succeeded but no answer was returned (the pseudo NODATA rcode).
 var ErrEmptyResponse = errors.New("empty response")
 
 type RCodeError uint16

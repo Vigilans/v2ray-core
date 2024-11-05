@@ -211,53 +211,9 @@ func (s *TCPNameServer) sendQuery(ctx context.Context, domain string, clientIP n
 			dnsCtx, cancel = context.WithDeadline(dnsCtx, deadline)
 			defer cancel()
 
-			b, err := dns.PackMessage(r.msg)
+			rec, err := sendQueryOverTCP(dnsCtx, s.dial, r.msg)
 			if err != nil {
-				newError("failed to pack dns query").Base(err).AtError().WriteToLog()
-				return
-			}
-
-			conn, err := s.dial(dnsCtx)
-			if err != nil {
-				newError("failed to dial namesever").Base(err).AtError().WriteToLog()
-				return
-			}
-			defer conn.Close()
-			dnsReqBuf := buf.New()
-			binary.Write(dnsReqBuf, binary.BigEndian, uint16(b.Len()))
-			dnsReqBuf.Write(b.Bytes())
-			b.Release()
-
-			_, err = conn.Write(dnsReqBuf.Bytes())
-			if err != nil {
-				newError("failed to send query").Base(err).AtError().WriteToLog()
-				return
-			}
-			dnsReqBuf.Release()
-
-			respBuf := buf.New()
-			defer respBuf.Release()
-			n, err := respBuf.ReadFullFrom(conn, 2)
-			if err != nil && n == 0 {
-				newError("failed to read response length").Base(err).AtError().WriteToLog()
-				return
-			}
-			var length int16
-			err = binary.Read(bytes.NewReader(respBuf.Bytes()), binary.BigEndian, &length)
-			if err != nil {
-				newError("failed to parse response length").Base(err).AtError().WriteToLog()
-				return
-			}
-			respBuf.Clear()
-			n, err = respBuf.ReadFullFrom(conn, int32(length))
-			if err != nil && n == 0 {
-				newError("failed to read response length").Base(err).AtError().WriteToLog()
-				return
-			}
-
-			rec, err := parseResponse(respBuf.Bytes())
-			if err != nil {
-				newError("failed to parse DNS over TCP response").Base(err).AtError().WriteToLog()
+				newError("failed to send DNS query over TCP").Base(err).AtError().WriteToLog()
 				return
 			}
 
@@ -358,4 +314,50 @@ func (s *TCPNameServer) QueryIP(ctx context.Context, domain string, clientIP net
 		case <-done:
 		}
 	}
+}
+
+func sendQueryOverTCP(ctx context.Context, dialer func(context.Context) (net.Conn, error), msg *dnsmessage.Message) (*IPRecord, error) {
+	b, err := dns.PackMessage(msg)
+	if err != nil {
+		return nil, newError("failed to pack dns query").Base(err).AtError()
+	}
+
+	conn, err := dialer(ctx)
+	if err != nil {
+		return nil, newError("failed to dial namesever").Base(err).AtError()
+	}
+	defer conn.Close()
+	dnsReqBuf := buf.New()
+	binary.Write(dnsReqBuf, binary.BigEndian, uint16(b.Len()))
+	dnsReqBuf.Write(b.Bytes())
+	b.Release()
+
+	_, err = conn.Write(dnsReqBuf.Bytes())
+	if err != nil {
+		return nil, newError("failed to send query").Base(err).AtError()
+	}
+	dnsReqBuf.Release()
+
+	respBuf := buf.New()
+	defer respBuf.Release()
+	n, err := respBuf.ReadFullFrom(conn, 2)
+	if err != nil && n == 0 {
+		return nil, newError("failed to read response length").Base(err).AtError()
+	}
+	var length int16
+	err = binary.Read(bytes.NewReader(respBuf.Bytes()), binary.BigEndian, &length)
+	if err != nil {
+		return nil, newError("failed to parse response length").Base(err).AtError()
+	}
+	respBuf.Clear()
+	n, err = respBuf.ReadFullFrom(conn, int32(length))
+	if err != nil && n == 0 {
+		return nil, newError("failed to read response length").Base(err).AtError()
+	}
+
+	rec, err := parseResponse(respBuf.Bytes())
+	if err != nil {
+		return nil, newError("failed to parse response").Base(err).AtError()
+	}
+	return rec, nil
 }

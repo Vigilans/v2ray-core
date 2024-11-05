@@ -170,6 +170,9 @@ func parseResponse(payload []byte) (*IPRecord, error) {
 	if err != nil {
 		return nil, newError("failed to parse DNS response").Base(err).AtWarning()
 	}
+	if h.Truncated {
+		return &IPRecord{ReqID: h.ID, RCode: h.RCode}, dns_feature.ErrTruncatedResponse
+	}
 	if err := parser.SkipAllQuestions(); err != nil {
 		return nil, newError("failed to skip questions in DNS response").Base(err).AtWarning()
 	}

@@ -34,6 +34,7 @@ type ClassicNameServer struct {
 	requests  map[uint16]dnsRequest
 	pub       *pubsub.Service
 	udpServer udp.DispatcherI
+	tcpDialer func(ctx context.Context) (net.Conn, error)
 	cleanup   *task.Periodic
 	reqID     uint32
 }
@@ -57,6 +58,17 @@ func NewClassicNameServer(address net.Destination, dispatcher routing.Dispatcher
 		Execute:  s.Cleanup,
 	}
 	s.udpServer = udp.NewSplitDispatcher(dispatcher, s.HandleResponse)
+	s.tcpDialer = func(ctx context.Context) (net.Conn, error) { // TCP dialer for retrying TCP query when UDP response is truncated
+		link, err := dispatcher.Dispatch(ctx, net.TCPDestination(s.address.Address, s.address.Port))
+		if err != nil {
+			return nil, err
+		}
+
+		return net.NewConnection(
+			net.ConnectionInputMulti(link.Writer),
+			net.ConnectionOutputMulti(link.Reader),
+		), nil
+	}
 	newError("DNS: created UDP client initialized for ", address.NetAddr()).AtInfo().WriteToLog()
 	return s
 }
@@ -111,15 +123,15 @@ func (s *ClassicNameServer) Cleanup() error {
 // HandleResponse handles udp response packet from remote DNS server.
 func (s *ClassicNameServer) HandleResponse(ctx context.Context, packet *udp_proto.Packet) {
 	ipRec, err := parseResponse(packet.Payload.Bytes())
-	if err != nil {
-		newError(s.name, " fail to parse responded DNS udp").AtError().WriteToLog()
+	if err != nil && err != dns_feature.ErrTruncatedResponse {
+		newError(s.name, " fail to parse UDP DNS response").Base(err).AtError().WriteToLog()
 		return
 	}
 
 	s.Lock()
 	id := ipRec.ReqID
 	req, ok := s.requests[id]
-	if ok {
+	if ok && err == nil {
 		// remove the pending request
 		delete(s.requests, id)
 	}
@@ -127,6 +139,18 @@ func (s *ClassicNameServer) HandleResponse(ctx context.Context, packet *udp_prot
 	if !ok {
 		newError(s.name, " cannot find the pending request").AtError().WriteToLog()
 		return
+	}
+
+	// Retry query with TCP if UDP response truncated
+	if err == dns_feature.ErrTruncatedResponse {
+		ipRec, err = sendQueryOverTCP(ctx, s.tcpDialer, req.msg)
+		if err != nil {
+			newError("failed to send DNS query over TCP").Base(err).AtError().WriteToLog()
+			return
+		}
+		s.Lock()
+		delete(s.requests, id)
+		s.Unlock()
 	}
 
 	var rec record
